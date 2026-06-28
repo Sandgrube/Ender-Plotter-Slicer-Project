@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ender-plotter-slicer"
+version = "1.1.0"
+description = "Qt-based pen plotter G-code generator for Ender-3-style and ELEGOO Neptune 2 machines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Quirin Forster" }
+]
+keywords = ["plotter", "gcode", "ender-3", "elegoo-neptune-2", "svg", "raster", "qt"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "PySide6>=6.6",
+  "svgpathtools>=1.6",
+  "matplotlib>=3.8",
+  "Pillow>=10.0",
+]
+
+[project.scripts]
+ender-plotter-slicer = "ender_plotter_slicer.app:main"
+
+[tool.setuptools]
+packages = ["ender_plotter_slicer", "ender_plotter_slicer.gui"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
