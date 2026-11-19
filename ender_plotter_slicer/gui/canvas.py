@@ -4,9 +4,9 @@ from math import ceil, floor
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QTransform
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QRubberBand
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView
 
-from ..document import DocumentObject, PlotterDocument
+from ..document import DocumentObject, PlotterDocument, RasterObject
 from ..geometry import Polyline
 
 
@@ -29,7 +29,7 @@ def object_to_qpath(obj: DocumentObject) -> QPainterPath:
 
 
 class CanvasObjectItem(QGraphicsPathItem):
-    def __init__(self, obj: DocumentObject, canvas: "CanvasView") -> None:
+    def __init__(self, obj: DocumentObject, canvas: CanvasView) -> None:
         super().__init__()
         self.object_id = obj.id
         self.canvas = canvas
@@ -44,6 +44,12 @@ class CanvasObjectItem(QGraphicsPathItem):
 
     def refresh_from_object(self, obj: DocumentObject) -> None:
         pen = QPen(QColor("#253858"), 0)
+        if isinstance(obj, RasterObject):
+            color = QColor("#202020")
+            color.setAlphaF(float(obj.raster_settings.get("stroke_opacity", 0.65)))
+            pen = QPen(color, float(obj.raster_settings.get("pencil_width_mm", 0.30)))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         self.setPen(pen)
         self.setBrush(Qt.BrushStyle.NoBrush)
         self.setPath(object_to_qpath(obj))

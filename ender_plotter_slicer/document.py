@@ -35,6 +35,7 @@ class GCodeSettings:
     join_tolerance_mm: float = DEFAULT_JOIN_TOLERANCE_MM
     include_comments: bool = True
     keep_pen_down_on_touching_paths: bool = True
+    retract_between_paths: bool = True
 
 
 @dataclass(slots=True)
@@ -81,7 +82,7 @@ class DocumentObject:
     def to_dict(self) -> dict[str, Any]:
         return self.base_dict()
 
-    def clone(self) -> "DocumentObject":
+    def clone(self) -> DocumentObject:
         data = self.to_dict()
         data["id"] = new_object_id()
         data["name"] = f"{self.name} Copy"
@@ -115,6 +116,7 @@ class RasterObject(DocumentObject):
     import_notes: str = ""
     sampled_columns: int = 0
     sampled_rows: int = 0
+    raster_settings: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = self.base_dict()
@@ -125,6 +127,7 @@ class RasterObject(DocumentObject):
                 "import_notes": self.import_notes,
                 "sampled_columns": self.sampled_columns,
                 "sampled_rows": self.sampled_rows,
+                "raster_settings": dict(self.raster_settings),
             }
         )
         return data
@@ -199,6 +202,10 @@ def object_from_dict(data: dict[str, Any]) -> DocumentObject:
             import_notes=data.get("import_notes", ""),
         )
     if object_type == "raster":
+        # Projects made before pencil hatching did not store path join flags.
+        # Keep the light gaps in those raster imports as well.
+        for polyline in common["local_polylines"]:
+            polyline.allow_join = False
         return RasterObject(
             **common,
             source_path=data.get("source_path", ""),
@@ -206,6 +213,7 @@ def object_from_dict(data: dict[str, Any]) -> DocumentObject:
             import_notes=data.get("import_notes", ""),
             sampled_columns=int(data.get("sampled_columns", 0)),
             sampled_rows=int(data.get("sampled_rows", 0)),
+            raster_settings=dict(data.get("raster_settings", {})),
         )
     return DocumentObject(**common)
 
@@ -234,7 +242,7 @@ class PlotterDocument:
         }
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> "PlotterDocument":
+    def from_dict(data: dict[str, Any]) -> PlotterDocument:
         page = PageSettings(**data.get("page", {}))
         gcode = GCodeSettings(**data.get("gcode", {}))
         profile_data = data.get("profile", {})

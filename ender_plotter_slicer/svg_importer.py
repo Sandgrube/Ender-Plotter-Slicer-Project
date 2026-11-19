@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from math import cos, pi, radians, sin
 from pathlib import Path
-import re
-import xml.etree.ElementTree as ET
 
-from svgpathtools import Arc, CubicBezier, Line, Path as SvgPath, QuadraticBezier, parse_path
+from svgpathtools import Line, parse_path
+from svgpathtools import Path as SvgPath
 
-from .geometry import AffineTransform, Point, Polyline, close_polyline_if_needed, combine_polylines_bbox, ensure_nonempty_polyline
-
+from .geometry import (
+    AffineTransform,
+    Point,
+    Polyline,
+    close_polyline_if_needed,
+    combine_polylines_bbox,
+    ensure_nonempty_polyline,
+)
 
 CSS_PX_TO_MM = 25.4 / 96.0
 
@@ -94,7 +101,6 @@ def _flatten_svg_segment(segment, tolerance_mm: float = 0.35) -> list[Point]:
 def _flatten_svg_path(path: SvgPath, tolerance_mm: float = 0.35) -> list[Polyline]:
     polylines: list[Polyline] = []
     current: list[Point] = []
-    last_end: Point | None = None
 
     for segment in path:
         segment_points = _flatten_svg_segment(segment, tolerance_mm=tolerance_mm)
@@ -107,7 +113,6 @@ def _flatten_svg_path(path: SvgPath, tolerance_mm: float = 0.35) -> list[Polylin
                     polylines.append(polyline)
                 current = [segment_points[0]]
         current.extend(segment_points[1:])
-        last_end = segment_points[-1]
 
     if current:
         closed = False

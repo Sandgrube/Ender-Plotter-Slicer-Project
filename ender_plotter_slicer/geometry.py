@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from math import cos, hypot, radians, sin
-from typing import Iterable, Sequence
-
 
 EPSILON = 1e-9
 
@@ -13,10 +12,10 @@ class Point:
     x: float
     y: float
 
-    def translated(self, dx: float, dy: float) -> "Point":
+    def translated(self, dx: float, dy: float) -> Point:
         return Point(self.x + dx, self.y + dy)
 
-    def distance_to(self, other: "Point") -> float:
+    def distance_to(self, other: Point) -> float:
         return hypot(self.x - other.x, self.y - other.y)
 
     def as_list(self) -> list[float]:
@@ -42,7 +41,7 @@ class BoundingBox:
     def center(self) -> Point:
         return Point((self.min_x + self.max_x) * 0.5, (self.min_y + self.max_y) * 0.5)
 
-    def expanded(self, margin: float) -> "BoundingBox":
+    def expanded(self, margin: float) -> BoundingBox:
         return BoundingBox(
             self.min_x - margin,
             self.min_y - margin,
@@ -56,7 +55,7 @@ class BoundingBox:
             and self.min_y - EPSILON <= point.y <= self.max_y + EPSILON
         )
 
-    def intersects(self, other: "BoundingBox") -> bool:
+    def intersects(self, other: BoundingBox) -> bool:
         return not (
             self.max_x < other.min_x
             or self.min_x > other.max_x
@@ -64,7 +63,7 @@ class BoundingBox:
             or self.min_y > other.max_y
         )
 
-    def union(self, other: "BoundingBox") -> "BoundingBox":
+    def union(self, other: BoundingBox) -> BoundingBox:
         return BoundingBox(
             min(self.min_x, other.min_x),
             min(self.min_y, other.min_y),
@@ -73,7 +72,7 @@ class BoundingBox:
         )
 
     @staticmethod
-    def from_points(points: Sequence[Point]) -> "BoundingBox":
+    def from_points(points: Sequence[Point]) -> BoundingBox:
         if not points:
             raise ValueError("Cannot compute a bounding box from no points.")
         xs = [p.x for p in points]
@@ -85,21 +84,22 @@ class BoundingBox:
 class Polyline:
     points: list[Point] = field(default_factory=list)
     closed: bool = False
+    allow_join: bool = True
 
     def is_valid(self) -> bool:
         return len(self.points) >= 2
 
-    def transformed(self, transform: "AffineTransform") -> "Polyline":
-        return Polyline([transform.apply(p) for p in self.points], self.closed)
+    def transformed(self, transform: AffineTransform) -> Polyline:
+        return Polyline([transform.apply(p) for p in self.points], self.closed, self.allow_join)
 
-    def reversed(self) -> "Polyline":
-        return Polyline(list(reversed(self.points)), self.closed)
+    def reversed(self) -> Polyline:
+        return Polyline(list(reversed(self.points)), self.closed, self.allow_join)
 
     def length(self) -> float:
         if len(self.points) < 2:
             return 0.0
         total = 0.0
-        for first, second in zip(self.points[:-1], self.points[1:]):
+        for first, second in zip(self.points[:-1], self.points[1:], strict=True):
             total += first.distance_to(second)
         if self.closed and len(self.points) > 2:
             total += self.points[-1].distance_to(self.points[0])
@@ -108,29 +108,30 @@ class Polyline:
     def bbox(self) -> BoundingBox:
         return BoundingBox.from_points(self.points)
 
-    def simplified(self, tolerance: float = 0.02) -> "Polyline":
+    def simplified(self, tolerance: float = 0.02) -> Polyline:
         if len(self.points) < 2:
-            return Polyline(list(self.points), self.closed)
+            return Polyline(list(self.points), self.closed, self.allow_join)
         simplified_points = [self.points[0]]
-        for point in self.points[1:]:
+        for point in self.points[1:-1]:
             if point.distance_to(simplified_points[-1]) >= tolerance:
                 simplified_points.append(point)
-        if len(simplified_points) == 1 and len(self.points) > 1:
+        if self.points[-1] != simplified_points[-1]:
             simplified_points.append(self.points[-1])
         if self.closed and simplified_points[0].distance_to(simplified_points[-1]) < tolerance:
             simplified_points[-1] = simplified_points[0]
-        return Polyline(simplified_points, self.closed)
+        return Polyline(simplified_points, self.closed, self.allow_join)
 
     def as_serializable(self) -> dict:
         return {
             "closed": self.closed,
+            "allow_join": self.allow_join,
             "points": [point.as_list() for point in self.points],
         }
 
     @staticmethod
-    def from_serializable(data: dict) -> "Polyline":
+    def from_serializable(data: dict) -> Polyline:
         pts = [Point(float(pair[0]), float(pair[1])) for pair in data.get("points", [])]
-        return Polyline(points=pts, closed=bool(data.get("closed", False)))
+        return Polyline(points=pts, closed=bool(data.get("closed", False)), allow_join=bool(data.get("allow_join", True)))
 
 
 @dataclass(slots=True)
@@ -148,7 +149,7 @@ class AffineTransform:
             self.m12 * point.x + self.m22 * point.y + self.dy,
         )
 
-    def combine(self, other: "AffineTransform") -> "AffineTransform":
+    def combine(self, other: AffineTransform) -> AffineTransform:
         return AffineTransform(
             m11=self.m11 * other.m11 + self.m21 * other.m12,
             m12=self.m12 * other.m11 + self.m22 * other.m12,
@@ -159,33 +160,33 @@ class AffineTransform:
         )
 
     @staticmethod
-    def identity() -> "AffineTransform":
+    def identity() -> AffineTransform:
         return AffineTransform()
 
     @staticmethod
-    def translation(dx: float, dy: float) -> "AffineTransform":
+    def translation(dx: float, dy: float) -> AffineTransform:
         return AffineTransform(dx=dx, dy=dy)
 
     @staticmethod
-    def scale(sx: float, sy: float | None = None) -> "AffineTransform":
+    def scale(sx: float, sy: float | None = None) -> AffineTransform:
         sy = sx if sy is None else sy
         return AffineTransform(m11=sx, m22=sy)
 
     @staticmethod
-    def rotation(degrees: float) -> "AffineTransform":
+    def rotation(degrees: float) -> AffineTransform:
         angle = radians(degrees)
         c = cos(angle)
         s = sin(angle)
         return AffineTransform(m11=c, m12=s, m21=-s, m22=c)
 
     @staticmethod
-    def mirror(horizontal: bool = False, vertical: bool = False) -> "AffineTransform":
+    def mirror(horizontal: bool = False, vertical: bool = False) -> AffineTransform:
         sx = -1.0 if horizontal else 1.0
         sy = -1.0 if vertical else 1.0
         return AffineTransform.scale(sx, sy)
 
     @staticmethod
-    def from_svg_matrix(a: float, b: float, c: float, d: float, e: float, f: float) -> "AffineTransform":
+    def from_svg_matrix(a: float, b: float, c: float, d: float, e: float, f: float) -> AffineTransform:
         return AffineTransform(m11=a, m12=b, m21=c, m22=d, dx=e, dy=f)
 
 
@@ -231,5 +232,5 @@ def close_polyline_if_needed(polyline: Polyline, tolerance: float = 0.01) -> Pol
     if len(polyline.points) < 2:
         return polyline
     if polyline.points[0].distance_to(polyline.points[-1]) > tolerance:
-        return Polyline(points=polyline.points + [polyline.points[0]], closed=True)
-    return Polyline(points=list(polyline.points), closed=True)
+        return Polyline(points=polyline.points + [polyline.points[0]], closed=True, allow_join=polyline.allow_join)
+    return Polyline(points=list(polyline.points), closed=True, allow_join=polyline.allow_join)

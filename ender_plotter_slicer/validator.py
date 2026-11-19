@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .document import PlotterDocument, TextObject
-from .geometry import BoundingBox, combine_polylines_bbox
+from .geometry import combine_polylines_bbox
 
 
 @dataclass(slots=True)

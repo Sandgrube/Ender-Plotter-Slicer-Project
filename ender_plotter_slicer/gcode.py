@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from math import isclose
-from typing import Iterable
+from dataclasses import dataclass
+from math import isclose, isfinite
 
-from .document import PlotterDocument
+from .document import PlotterDocument, RasterObject
 from .geometry import AffineTransform, Point, Polyline
+from .path_order import optimise_order as _optimise_order
 from .preview import PreviewBundle, PreviewSegment
 
 
@@ -14,6 +14,8 @@ class PlotStats:
     draw_length_mm: float = 0.0
     travel_length_mm: float = 0.0
     path_count: int = 0
+    z_length_mm: float = 0.0
+    motion_time_lower_bound_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -60,45 +62,17 @@ def _map_point_to_machine(document: PlotterDocument, point: Point) -> Point:
 def _collect_world_polylines(document: PlotterDocument) -> list[Polyline]:
     polylines: list[Polyline] = []
     for obj in document.visible_objects():
-        polylines.extend(
-            [
-                polyline.simplified(document.gcode.curve_tolerance_mm * 0.25)
-                for polyline in obj.world_polylines()
-                if polyline.is_valid()
-            ]
-        )
+        for polyline in obj.world_polylines():
+            if not polyline.is_valid():
+                continue
+            if isinstance(obj, RasterObject):
+                polyline.allow_join = False
+            tolerance = document.gcode.curve_tolerance_mm * 0.25
+            simplified = polyline.simplified(tolerance if polyline.allow_join else min(tolerance, 0.025))
+            if simplified.closed and simplified.points[-1] != simplified.points[0]:
+                simplified.points.append(simplified.points[0])
+            polylines.append(simplified)
     return [polyline for polyline in polylines if polyline.length() > 0.01]
-
-
-def _optimise_order(polylines: list[Polyline]) -> list[Polyline]:
-    if not polylines:
-        return []
-
-    remaining = polylines[:]
-    ordered = [remaining.pop(0)]
-    current_point = ordered[0].points[-1]
-
-    while remaining:
-        best_index = 0
-        best_reverse = False
-        best_distance = float("inf")
-        for index, polyline in enumerate(remaining):
-            start_distance = current_point.distance_to(polyline.points[0])
-            end_distance = current_point.distance_to(polyline.points[-1])
-            if start_distance < best_distance:
-                best_distance = start_distance
-                best_index = index
-                best_reverse = False
-            if end_distance < best_distance:
-                best_distance = end_distance
-                best_index = index
-                best_reverse = True
-        next_polyline = remaining.pop(best_index)
-        if best_reverse:
-            next_polyline = next_polyline.reversed()
-        ordered.append(next_polyline)
-        current_point = next_polyline.points[-1]
-    return ordered
 
 
 class _GCodeBuilder:
@@ -129,6 +103,10 @@ class _GCodeBuilder:
         if comment and self.document.gcode.include_comments:
             line += f" ; {comment}"
         self.lines.append(line)
+        if self.current_z is not None:
+            distance = abs(z - self.current_z)
+            self.stats.z_length_mm += distance
+            self.stats.motion_time_lower_bound_s += distance / self.document.profile.z_feed_mm_min * 60
         self.current_z = z
 
     def pen_raise_to_retract(self) -> None:
@@ -144,9 +122,18 @@ class _GCodeBuilder:
         self.z_move(profile.pen_down_z_mm, "pen down")
         self.pen_down = True
 
+    def pen_raise_for_travel(self) -> None:
+        if self.document.gcode.retract_between_paths:
+            self.pen_raise_to_retract()
+        else:
+            self.z_move(self.document.profile.pen_up_z_mm, "pen up")
+            self.pen_down = False
+
     def travel_to(self, point: Point) -> None:
         if self.current_xy is not None:
-            self.stats.travel_length_mm += self.current_xy.distance_to(point)
+            distance = self.current_xy.distance_to(point)
+            self.stats.travel_length_mm += distance
+            self.stats.motion_time_lower_bound_s += distance / self.document.profile.travel_feed_mm_min * 60
             self.preview.segments.append(PreviewSegment(self.current_xy, point, is_draw=False))
         self.lines.append(
             f"G0 X{self._fmt(point.x)} Y{self._fmt(point.y)} F{self._fmt(self.document.profile.travel_feed_mm_min)}"
@@ -155,7 +142,9 @@ class _GCodeBuilder:
 
     def draw_to(self, point: Point) -> None:
         if self.current_xy is not None:
-            self.stats.draw_length_mm += self.current_xy.distance_to(point)
+            distance = self.current_xy.distance_to(point)
+            self.stats.draw_length_mm += distance
+            self.stats.motion_time_lower_bound_s += distance / self.document.profile.plot_feed_mm_min * 60
             self.preview.segments.append(PreviewSegment(self.current_xy, point, is_draw=True))
         self.lines.append(
             f"G1 X{self._fmt(point.x)} Y{self._fmt(point.y)} F{self._fmt(self.document.profile.plot_feed_mm_min)}"
@@ -164,12 +153,17 @@ class _GCodeBuilder:
 
 
 def generate_gcode(document: PlotterDocument) -> GCodeResult:
+    for name in ("z_feed_mm_min", "travel_feed_mm_min", "plot_feed_mm_min"):
+        value = getattr(document.profile, name)
+        if not isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive.")
     polylines = _collect_world_polylines(document)
     if document.gcode.optimize_order:
         polylines = _optimise_order(polylines)
 
     mapped_polylines = [
-        Polyline([_map_point_to_machine(document, point) for point in polyline.points], closed=polyline.closed)
+        Polyline([_map_point_to_machine(document, point) for point in polyline.points],
+                 closed=polyline.closed, allow_join=polyline.allow_join)
         for polyline in polylines
     ]
 
@@ -190,6 +184,7 @@ def generate_gcode(document: PlotterDocument) -> GCodeResult:
     builder.travel_to(Point(profile.safe_start_x_mm, profile.safe_start_y_mm))
 
     previous_end: Point | None = builder.current_xy
+    previous_allows_join = False
     for index, polyline in enumerate(mapped_polylines, start=1):
         if not polyline.points:
             continue
@@ -197,21 +192,25 @@ def generate_gcode(document: PlotterDocument) -> GCodeResult:
         end = polyline.points[-1]
         keep_pen_down = (
             document.gcode.keep_pen_down_on_touching_paths
+            and builder.pen_down
+            and previous_allows_join
+            and polyline.allow_join
             and previous_end is not None
             and previous_end.distance_to(start) <= document.gcode.join_tolerance_mm
         )
         if not keep_pen_down:
-            builder.pen_raise_to_retract()
+            builder.pen_raise_for_travel()
             builder.comment(f"path {index}/{len(mapped_polylines)}")
             builder.travel_to(start)
             builder.pen_lower()
-        elif not builder.pen_down:
-            builder.pen_lower()
+        elif builder.current_xy != start:
+            builder.draw_to(start)
 
         for point in polyline.points[1:]:
             builder.draw_to(point)
 
         previous_end = end
+        previous_allows_join = polyline.allow_join
 
     builder.pen_raise_to_retract()
     builder.travel_to(Point(profile.safe_start_x_mm, profile.safe_start_y_mm))

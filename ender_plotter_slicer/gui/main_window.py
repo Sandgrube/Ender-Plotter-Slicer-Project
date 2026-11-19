@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog,
     QDockWidget,
+    QFileDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -20,12 +21,13 @@ from ..document import PlotterDocument, RasterObject, TextObject
 from ..gcode import generate_gcode
 from ..profiles import builtin_profiles
 from ..project_io import ProjectIOError, load_project, save_project
+from ..raster_importer import RasterImportSettings
 from ..svg_importer import SVGImportError, import_svg_file
-from ..raster_importer import RasterImportError, import_raster_file
 from ..validator import validate_document
 from .canvas import CanvasView
-from .dialogs import NewTextDialog, PreviewDialog, RasterImportDialog
+from .dialogs import NewTextDialog, PreviewDialog
 from .property_panel import PropertyPanel
+from .raster_dialog import RasterImportDialog
 from .settings_panel import SettingsPanel
 
 
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         self.save_as_action = QAction("Save Project As...", self, shortcut=QKeySequence.StandardKey.SaveAs, triggered=self.save_project_as)
         self.import_svg_action = QAction("Import SVG...", self, triggered=self.import_svg)
         self.import_image_action = QAction("Import Image...", self, triggered=self.import_image)
+        self.adjust_image_action = QAction("Adjust Image Hatching...", self, triggered=self.adjust_image_hatching)
         self.add_text_action = QAction("Add Text...", self, triggered=self.add_text)
         self.export_action = QAction("Preview / Export G-Code...", self, shortcut="Ctrl+E", triggered=self.preview_and_export)
         self.exit_action = QAction("Exit", self, shortcut=QKeySequence.StandardKey.Quit, triggered=self.close)
@@ -174,6 +177,7 @@ class MainWindow(QMainWindow):
             self.redo_action,
             self.delete_action,
             self.duplicate_action,
+            self.adjust_image_action,
             self.center_action,
             self.align_left_action,
             self.align_right_action,
@@ -330,23 +334,15 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        dialog = RasterImportDialog(self)
+        settings = RasterImportSettings(
+            width_mm=max(5, min(120, self.document.page.width_mm - 20)),
+            max_height_mm=max(5, min(180, self.document.page.height_mm - 20)),
+        )
+        dialog = RasterImportDialog(path, self, settings=settings)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
 
-        try:
-            result = import_raster_file(path, dialog.settings())
-        except RasterImportError as exc:
-            QMessageBox.critical(self, "Image Import Failed", str(exc))
-            return
-
-        if not result.polylines:
-            QMessageBox.warning(
-                self,
-                "Image Import",
-                "No plot lines were generated. Lower the darkness threshold, reduce gamma, or increase contrast.",
-            )
-            return
+        result = dialog.result
 
         raster_object = RasterObject(
             name=Path(path).stem,
@@ -355,6 +351,7 @@ class MainWindow(QMainWindow):
             import_notes=result.notes,
             sampled_columns=result.sampled_columns,
             sampled_rows=result.sampled_rows,
+            raster_settings=dialog.settings_dict,
             local_polylines=result.polylines,
             x_mm=10.0,
             y_mm=10.0,
@@ -364,6 +361,35 @@ class MainWindow(QMainWindow):
         self.canvas.refresh_object(raster_object.id)
         self.canvas.apply_selection(self.document.selected_ids)
         self.property_panel.set_selection(self.document.selected_objects())
+        self.mark_modified()
+        self.statusBar().showMessage(result.notes, 7000)
+
+    def adjust_image_hatching(self) -> None:
+        objects = self.document.selected_objects()
+        if len(objects) != 1 or not isinstance(objects[0], RasterObject):
+            QMessageBox.information(self, "Adjust Image", "Select one imported raster image first.")
+            return
+        obj = objects[0]
+        path = obj.source_path
+        if not Path(path).is_file():
+            path, _ = QFileDialog.getOpenFileName(self, "Locate Original Image", "", IMAGE_FILE_FILTER)
+            if not path:
+                return
+        # Old projects contain geometry but no import settings. Start from a
+        # pencil preset; their existing paths remain intact until acceptance.
+        defaults = asdict(RasterImportSettings())
+        defaults.update({key: value for key, value in obj.raster_settings.items() if key in defaults})
+        dialog = RasterImportDialog(path, self, settings=RasterImportSettings(**defaults))
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        result = dialog.result
+        obj.local_polylines = result.polylines
+        obj.source_path, obj.source_name = result.source_path, result.source_name
+        obj.import_notes = result.notes
+        obj.sampled_columns, obj.sampled_rows = result.sampled_columns, result.sampled_rows
+        obj.raster_settings = dialog.settings_dict
+        self.canvas.refresh_object(obj.id)
+        self.property_panel.set_selection([obj])
         self.mark_modified()
         self.statusBar().showMessage(result.notes, 7000)
 
