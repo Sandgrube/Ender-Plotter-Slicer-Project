@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
-from pathlib import Path
 import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 @dataclass(slots=True)
@@ -34,7 +34,7 @@ class MachineProfile:
         return asdict(self)
 
     @staticmethod
-    def from_dict(data: dict) -> "MachineProfile":
+    def from_dict(data: dict) -> MachineProfile:
         return MachineProfile(**data)
 
 

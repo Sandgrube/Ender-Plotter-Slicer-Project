@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from matplotlib.font_manager import FontProperties
 from matplotlib.path import Path as MplPath
-from matplotlib.textpath import TextPath
 from matplotlib.text import TextToPath
+from matplotlib.textpath import TextPath
 
 from .geometry import Point, Polyline, ensure_nonempty_polyline
-
 
 _PT_TO_MM = 25.4 / 72.0
 _MM_TO_PT = 72.0 / 25.4

@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QLineEdit,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )

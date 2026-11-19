@@ -1,14 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ender_plotter_slicer.document import DocumentObject, PlotterDocument
-from ender_plotter_slicer.gcode import generate_gcode
-from ender_plotter_slicer.geometry import Point, Polyline
-from ender_plotter_slicer.raster_importer import RasterImportSettings, import_raster_file
-
+from ender_plotter_slicer.document import DocumentObject, PlotterDocument  # noqa: E402
+from ender_plotter_slicer.gcode import generate_gcode  # noqa: E402
+from ender_plotter_slicer.geometry import Point, Polyline  # noqa: E402
+from ender_plotter_slicer.raster_importer import RasterImportSettings, import_raster_file  # noqa: E402
 
 
 def main() -> int:

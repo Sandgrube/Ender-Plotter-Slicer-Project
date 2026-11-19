@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGraphicsScene,
@@ -14,21 +17,16 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
-    QComboBox,
-    QDoubleSpinBox,
-    QSpinBox,
-    QCheckBox,
-    QMessageBox,
 )
 
 from ..config import GCODE_FILE_FILTER
 from ..document import PlotterDocument, TextObject
-from ..raster_importer import RasterImportSettings
 from ..gcode import GCodeResult
 from ..validator import ValidationIssue
 
@@ -77,77 +75,33 @@ class NewTextDialog(QDialog):
         return obj
 
 
-class RasterImportDialog(QDialog):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Import Raster Image")
-        self.resize(460, 420)
+class _MachinePreviewView(QGraphicsView):
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # Machine coordinates have +Y upwards; Qt scenes have +Y downwards.
+        self.scale(1, -1)
 
-        self.width_spin = self._make_spin(5.0, 220.0, 2, 120.0, " mm")
-        self.max_height_spin = self._make_spin(5.0, 220.0, 2, 180.0, " mm")
-        self.x_resolution_spin = self._make_spin(0.05, 5.0, 3, 0.35, " mm")
-        self.line_spacing_spin = self._make_spin(0.05, 5.0, 3, 0.45, " mm")
-        self.threshold_spin = self._make_spin(0.0, 100.0, 1, 35.0, " %")
-        self.tone_layers_spin = QSpinBox()
-        self.tone_layers_spin.setRange(1, 8)
-        self.tone_layers_spin.setValue(3)
-        self.contrast_spin = self._make_spin(0.1, 5.0, 2, 1.0, "")
-        self.gamma_spin = self._make_spin(0.1, 5.0, 2, 1.0, "")
-        self.min_segment_spin = self._make_spin(0.0, 10.0, 2, 0.60, " mm")
-        self.merge_gap_spin = self._make_spin(0.0, 10.0, 2, 0.35, " mm")
-        self.invert_check = QCheckBox("Invert brightness")
+    def fit_paths(self):
+        self.fitInView(self.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
-        help_label = QLabel(
-            "Dark pixels become plot lines. More tone layers create denser hatching in darker areas. "
-            "Use one tone layer for clean line-art or logos."
-        )
-        help_label.setWordWrap(True)
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_paths()
 
-        form = QFormLayout()
-        form.addRow("Target width", self.width_spin)
-        form.addRow("Max height", self.max_height_spin)
-        form.addRow("Horizontal sample", self.x_resolution_spin)
-        form.addRow("Line spacing", self.line_spacing_spin)
-        form.addRow("Darkness threshold", self.threshold_spin)
-        form.addRow("Tone layers", self.tone_layers_spin)
-        form.addRow("Contrast", self.contrast_spin)
-        form.addRow("Gamma", self.gamma_spin)
-        form.addRow("Minimum segment", self.min_segment_spin)
-        form.addRow("Merge small gaps", self.merge_gap_spin)
-        form.addRow(self.invert_check)
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.fit_paths()
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+    def mouseDoubleClickEvent(self, event):
+        self.fit_paths()
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(help_label)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-
-    def _make_spin(self, minimum: float, maximum: float, decimals: int, value: float, suffix: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setRange(minimum, maximum)
-        spin.setDecimals(decimals)
-        spin.setValue(value)
-        spin.setSingleStep(1.0 if decimals <= 1 else 0.1)
-        spin.setSuffix(suffix)
-        return spin
-
-    def settings(self) -> RasterImportSettings:
-        return RasterImportSettings(
-            width_mm=self.width_spin.value(),
-            max_height_mm=self.max_height_spin.value(),
-            horizontal_resolution_mm=self.x_resolution_spin.value(),
-            line_spacing_mm=self.line_spacing_spin.value(),
-            darkness_threshold=self.threshold_spin.value() / 100.0,
-            tone_layers=self.tone_layers_spin.value(),
-            contrast=self.contrast_spin.value(),
-            gamma=self.gamma_spin.value(),
-            invert=self.invert_check.isChecked(),
-            min_segment_mm=self.min_segment_spin.value(),
-            merge_gap_mm=self.merge_gap_spin.value(),
-        )
+    def wheelEvent(self, event):
+        factor = 1.2 if event.angleDelta().y() > 0 else 1 / 1.2
+        if 0.05 <= abs(self.transform().m11()) * factor <= 50:
+            self.scale(factor, factor)
 
 
 class PreviewDialog(QDialog):
@@ -162,11 +116,16 @@ class PreviewDialog(QDialog):
         self.resize(1200, 760)
 
         self.scene = QGraphicsScene(self)
-        self.view = QGraphicsView(self.scene)
+        self.view = _MachinePreviewView(self.scene)
         self._populate_scene()
+        self.show_travel = QCheckBox("Show pen-up travel")
+        self.show_travel.toggled.connect(self.travel_item.setVisible)
 
         self.gcode_preview = QPlainTextEdit()
-        self.gcode_preview.setPlainText(result.gcode)
+        shown_lines = result.lines[:4000]
+        if len(result.lines) > len(shown_lines):
+            shown_lines = [*shown_lines, f"; Preview truncated at 4,000 of {len(result.lines):,} lines. Save exports the complete G-code."]
+        self.gcode_preview.setPlainText("\n".join(shown_lines))
         self.gcode_preview.setReadOnly(True)
         self.gcode_preview.setFont(QFont("Courier New", 10))
 
@@ -176,16 +135,21 @@ class PreviewDialog(QDialog):
         if not issues:
             self.issue_list.addItem("No validation issues.")
 
+        minutes = result.stats.motion_time_lower_bound_s / 60
         stats_label = QLabel(
             f"Paths: {result.stats.path_count}    "
             f"Draw length: {result.stats.draw_length_mm:.1f} mm    "
-            f"Travel length: {result.stats.travel_length_mm:.1f} mm"
+            f"Travel length: {result.stats.travel_length_mm:.1f} mm\n"
+            f"Motion time ≥ {int(minutes // 60)} h {int(minutes % 60)} min (includes pen lifts).\n"
+            "Homing, acceleration, dwell and custom start/end commands add time."
         )
+        stats_label.setWordWrap(True)
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.addWidget(QLabel("Machine-Space Path Preview"))
+        left_layout.addWidget(QLabel("Machine paths · X →, Y ↑ · Wheel: zoom · Double-click: fit"))
         left_layout.addWidget(self.view, 1)
+        left_layout.addWidget(self.show_travel)
         left_layout.addWidget(stats_label)
         left_layout.addWidget(QLabel("Validation"))
         left_layout.addWidget(self.issue_list, 0)
@@ -225,12 +189,17 @@ class PreviewDialog(QDialog):
         self.scene.clear()
         self.scene.setSceneRect(work_rect.adjusted(-10, -10, 10, 10))
         self.scene.addRect(work_rect, QPen(QColor("#b7c3d0")), QColor("white"))
+        # Two graphics items handle dense drawings without creating one Qt
+        # object per G-code move. Keep travel separate so it cannot hide tone.
+        draw_path, travel_path = QPainterPath(), QPainterPath()
         for segment in self.result.preview.segments:
-            pen = QPen(QColor("#2b6ef2") if segment.is_draw else QColor("#9aa8b8"))
-            pen.setWidthF(0)
-            if not segment.is_draw:
-                pen.setStyle(Qt.PenStyle.DashLine)
-            self.scene.addLine(segment.start.x, segment.start.y, segment.end.x, segment.end.y, pen)
+            path = draw_path if segment.is_draw else travel_path
+            path.moveTo(segment.start.x, segment.start.y)
+            path.lineTo(segment.end.x, segment.end.y)
+        self.scene.addPath(draw_path, QPen(QColor("#303030"), 0))
+        travel_pen = QPen(QColor("#9aa8b8"), 0, Qt.PenStyle.DashLine)
+        self.travel_item = self.scene.addPath(travel_path, travel_pen)
+        self.travel_item.setVisible(False)
         self.view.fitInView(work_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _save_gcode(self) -> None:

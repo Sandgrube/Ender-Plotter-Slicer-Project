@@ -10,9 +10,13 @@ The project is intended for 3D-printer-to-plotter conversions where a pen holder
 - Text-to-path generation
 - SVG import
 - PNG/JPG/BMP/WEBP/TIFF raster import
-- Raster-to-line conversion based on image darkness
-- Adjustable hatch density for grayscale images
-- G-code preview before export
+- Continuous-tone pencil crosshatching for photos and portraits
+- Form-following curved hatching and preserved highlights
+- Pencil presets with physical stroke width and graphite darkness calibration
+- Source / actual-path preview before import, with cancellable background conversion
+- Reprocess imported drawings without losing their page placement
+- Scalable nearest-endpoint path ordering for dense drawings
+- G-code preview with travel visibility and motion-time lower bounds
 - Marlin-compatible XY/Z-only output
 - Built-in profiles for:
   - ELEGOO Neptune 2 Pen Plotter
@@ -21,9 +25,11 @@ The project is intended for 3D-printer-to-plotter conversions where a pen holder
 - Scrollable settings panel for smaller screens
 - JSON project files: `*.plotproj.json`
 
-## Screenshots
+## Pencil drawing comparison
 
-Screenshots are not included yet. Add them later under `docs/images/` and reference them here.
+![Source, legacy scanlines, tonal crosshatching and form-following pencil](docs/images/pencil_comparison.png)
+
+This comparison renders the actual plot paths. The physical result depends on the pencil and paper.
 
 ## Quick start on Windows
 
@@ -68,36 +74,17 @@ Use **File → Import Image...** to import:
 - WEBP
 - TIFF
 
-The app does not embed the bitmap into the G-code. It samples the brightness of the image and converts dark regions into horizontal plotter polylines.
+The app converts image tone into real plotter paths. **Pencil · balanced** is the default. It uses angled strokes, continuous density and extra hatch directions in shadows. **Pencil · fine portrait** preserves more detail. **Pencil · form-following** adds curved marks based on local image structure.
 
-### Important raster settings
+1. Open **File → Import Image...**.
+2. Set the drawing size and select a preset.
+3. Enter the width and approximate darkness of a real plotted pencil stroke.
+4. Use **Update Preview**. Compare the source with the simulated graphite paths.
+5. Use **Import Drawing**. Select **Preview / Export G-Code...** to inspect machine moves and drawing time.
 
-| Setting | Meaning |
-|---|---|
-| Target width | Physical width of the plotted image in millimetres. |
-| Max height | Maximum physical height. Aspect ratio is preserved. |
-| Horizontal sample | X resolution of the sampling grid. Smaller values create more detail and larger G-code files. |
-| Line spacing | Distance between scan lines. Smaller values create denser output. |
-| Darkness threshold | Minimum darkness required before a segment is drawn. |
-| Tone layers | Multiple darkness levels. Darker areas receive more hatch lines. |
-| Contrast / Gamma | Controls how brightness is interpreted. |
-| Invert brightness | Useful for bright line art on a dark background. |
+Use **Edit → Adjust Image Hatching...** to revise a selected drawing. Import settings and geometry are saved in the project. Existing projects remain readable.
 
-Recommended starting values for clean logos or line art:
-
-```text
-Tone layers:        1
-Darkness threshold: 35-60 %
-Line spacing:       0.4-0.8 mm
-```
-
-Recommended starting values for photos or grayscale images:
-
-```text
-Tone layers:        3-5
-Darkness threshold: 20-40 %
-Line spacing:       0.3-0.6 mm
-```
+Read [Pencil drawing and raster import](docs/raster_import.md) for all settings, physical calibration, lift strategy and the limits of the preview.
 
 ## ELEGOO Neptune 2 profile
 
@@ -169,6 +156,7 @@ ender_plotter_slicer/
 ```bash
 python -m compileall ender_plotter_slicer
 python tools/smoke_test.py
+python tools/render_pencil_demo.py
 ```
 
 Optional:

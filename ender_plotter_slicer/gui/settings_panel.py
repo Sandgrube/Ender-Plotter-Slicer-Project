@@ -8,13 +8,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
+    QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
-    QPlainTextEdit,
-    QScrollArea,
-    QFrame,
 )
 
 from ..document import GCodeSettings, PageSettings, PlotterDocument
@@ -95,6 +95,11 @@ class SettingsPanel(QWidget):
         self.optimize_check = QCheckBox("Optimize plot order")
         self.include_comments_check = QCheckBox("Write comments")
         self.keep_pen_check = QCheckBox("Keep pen down on touching paths")
+        self.retract_paths_check = QCheckBox("Full retract between strokes")
+        self.retract_paths_check.setToolTip(
+            "When off, travel between strokes uses the calibrated Pen-up Z. "
+            "Start and end still use Retract Z. Use full retract if obstacles require that clearance."
+        )
         self.curve_tolerance_spin = self._make_spin(0.05, 5.0, 3, 0.35)
         self.join_tolerance_spin = self._make_spin(0.01, 10.0, 3, 0.2)
 
@@ -103,6 +108,7 @@ class SettingsPanel(QWidget):
         gcode_layout.addRow(self.optimize_check)
         gcode_layout.addRow(self.include_comments_check)
         gcode_layout.addRow(self.keep_pen_check)
+        gcode_layout.addRow(self.retract_paths_check)
         gcode_layout.addRow("Curve tolerance [mm]", self.curve_tolerance_spin)
         gcode_layout.addRow("Join tolerance [mm]", self.join_tolerance_spin)
 
@@ -198,6 +204,7 @@ class SettingsPanel(QWidget):
             self.optimize_check.setChecked(gcode.optimize_order)
             self.include_comments_check.setChecked(gcode.include_comments)
             self.keep_pen_check.setChecked(gcode.keep_pen_down_on_touching_paths)
+            self.retract_paths_check.setChecked(gcode.retract_between_paths)
             self._load_profile_fields(profile)
         finally:
             self._loading = False
@@ -240,5 +247,6 @@ class SettingsPanel(QWidget):
             join_tolerance_mm=self.join_tolerance_spin.value(),
             include_comments=self.include_comments_check.isChecked(),
             keep_pen_down_on_touching_paths=self.keep_pen_check.isChecked(),
+            retract_between_paths=self.retract_paths_check.isChecked(),
         )
         self.settingsApplied.emit(page, profile, gcode)

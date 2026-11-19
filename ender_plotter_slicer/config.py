@@ -2,7 +2,7 @@ from __future__ import annotations
 
 APP_NAME = "Ender Plotter Slicer"
 APP_ORG = "Mission Proton"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 PROJECT_FILE_FILTER = "Plotter Projects (*.plotproj.json)"
 GCODE_FILE_FILTER = "G-Code Files (*.gcode *.nc *.txt)"
 SVG_FILE_FILTER = "SVG Files (*.svg)"
